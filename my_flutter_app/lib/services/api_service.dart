@@ -81,11 +81,10 @@ class ApiService {
 
       if (response.statusCode == 200) {
         print('회원가입 성공');
-        return null; // 성공 시 null 반환
+        return null;
       } else {
         print('회원가입 실패: ${response.statusCode}');
         final body = utf8.decode(response.bodyBytes);
-        print('응답 내용: $body');
         final Map<String, dynamic> data = jsonDecode(body);
         return data['message'] ?? '알 수 없는 오류가 발생했습니다.';
       }
@@ -156,5 +155,35 @@ class ApiService {
       print('사용자 전적 정보 로딩 중 에러: $e');
     }
     return null;
+  }
+
+  // '준비 완료' API 호출 함수
+  static Future<bool> sendReady({
+    required String accessToken,
+    required String chatRoomId,
+  }) async {
+    final url = Uri.parse('$_baseUrl/api/v1/game/ready');
+    try {
+      final response = await http.post(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $accessToken',
+        },
+        body: jsonEncode({'chatRoomId': chatRoomId}),
+      );
+
+      if (response.statusCode == 200) {
+        print("'준비 완료' (ready) 요청 성공");
+        return true;
+      } else {
+        print("'준비 완료' (ready) 요청 실패: ${response.statusCode}");
+        print("응답: ${response.body}");
+        return false;
+      }
+    } catch (e) {
+      print("'준비 완료' (ready) 요청 중 에러: $e");
+      return false;
+    }
   }
 }

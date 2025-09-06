@@ -1,6 +1,6 @@
-// ✅ [수정] dart.async -> dart:async 오타 수정
 import 'dart:async';
 import 'package:bluffing_frontend/services/api_service.dart';
+import 'package:bluffing_frontend/services/game_service.dart';
 import 'package:flutter/material.dart';
 import '../widgets/custom_app_bar.dart';
 import '../widgets/join_game_card.dart';
@@ -9,17 +9,15 @@ import 'chat_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   final String accessToken;
-
   const HomeScreen({super.key, required this.accessToken});
-
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  final GameService _gameService = GameService();
   bool _isMatching = false;
-  Timer? _timer;
-  int _countdown = 5;
+  String _matchingStatusText = "매칭 중입니다...";
 
   bool _isLoading = true;
   String _userName = "로딩 중...";
@@ -37,13 +35,12 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
-    _timer?.cancel();
+    _gameService.deactivate();
     super.dispose();
   }
 
   Future<void> _loadUserProfile() async {
     try {
-      // 5초의 타임아웃 설정
       final results = await Future.wait([
         ApiService.getUserSummary(widget.accessToken),
         ApiService.getUserRecord(widget.accessToken),
@@ -64,12 +61,11 @@ class _HomeScreenState extends State<HomeScreen> {
         });
       }
     } catch (e) {
-      // 에러 발생 또는 타임아웃 시
       print("프로필 로딩 실패: $e");
       if (mounted) {
         setState(() {
           _userName = "정보 로딩 실패";
-          _isLoading = false; // 에러가 나도 로딩은 끝내야 함
+          _isLoading = false;
         });
       }
     }
@@ -78,23 +74,41 @@ class _HomeScreenState extends State<HomeScreen> {
   void _startMatching() {
     setState(() {
       _isMatching = true;
-      _countdown = 5;
+      _matchingStatusText = "매칭 서버에 연결 중...";
     });
 
-    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (_countdown > 0) {
-        setState(() {
-          _countdown--;
-        });
-      } else {
-        timer.cancel();
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(
-            builder: (context) => const ChatScreen(),
-          ),
-        );
-      }
-    });
+    _gameService.startMatching(
+      accessToken: widget.accessToken,
+      onRequested: () {
+        if (mounted) {
+          setState(() {
+            _matchingStatusText = "다른 플레이어를 기다리는 중...";
+          });
+        }
+      },
+      onSuccess: (response) {
+        if (mounted) {
+          print("최종 매칭 성공! 채팅 화면으로 이동합니다.");
+          // ✅ [수정] ChatScreen으로 매칭 데이터를 전달합니다.
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (context) => ChatScreen(matchData: response),
+            ),
+          );
+        }
+      },
+      onError: (error) {
+        if (mounted) {
+          setState(() {
+            _isMatching = false;
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text("매칭 실패: $error")),
+          );
+        }
+      },
+    );
   }
 
   @override
@@ -162,18 +176,12 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildMatchingIndicator() {
     return Column(
       children: [
-        const Text('매칭 중입니다...', style: TextStyle(color: Colors.white, fontSize: 18)),
-        const SizedBox(height: 8),
-        Text('0:0$_countdown', style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
-        const SizedBox(height: 12),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 40.0),
-          child: LinearProgressIndicator(
-            value: _countdown / 5.0,
-            backgroundColor: Colors.white.withOpacity(0.3),
-            valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
-          ),
-        )
+        Text(_matchingStatusText,
+            style: const TextStyle(color: Colors.white, fontSize: 18)),
+        const SizedBox(height: 20),
+        const CircularProgressIndicator(
+          color: Colors.white,
+        ),
       ],
     );
   }

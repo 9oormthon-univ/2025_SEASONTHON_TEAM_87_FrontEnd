@@ -1,65 +1,97 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
+import 'package:bluffing_frontend/services/game_service.dart';
 import 'victory_screen.dart';
 import 'lose_screen.dart';
 
 class ChatScreen extends StatefulWidget {
-  const ChatScreen({super.key});
+  final MatchSuccessResponse matchData;
+
+  const ChatScreen({
+    super.key,
+    required this.matchData,
+  });
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
 }
 
 class _ChatScreenState extends State<ChatScreen> {
+  // ✅ [추가] GameService 인스턴스 가져오기
+  final GameService _gameService = GameService();
+
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   Timer? _timer;
   Timer? _countdownTimer;
-  int _remainingSeconds = 1; // 3분 = 180초
-  int _countdownSeconds = 1; // 5초 카운트다운
+  int _remainingSeconds = 180;
+  int _countdownSeconds = 5;
   int? _selectedPlayer;
-  final List<int> _players = [2, 3, 4, 5, 6]; // 1번은 현재 플레이어이므로 제외
-  
-  final List<ChatMessage> _messages = [
-    ChatMessage(
-      text: "급식에 떡볶이 나왔었음",
-      isMe: true,
-      playerNumber: null,
-    ),
-    ChatMessage(
-      text: "아이스크림도 종종 나옴",
-      isMe: false,
-      playerNumber: 3,
-    ),
-    ChatMessage(
-      text: "엥 그럴리가",
-      isMe: false,
-      playerNumber: 2,
-    ),
-    ChatMessage(
-      text: "학바학인거 같은데",
-      isMe: false,
-      playerNumber: 4,
-    ),
-    ChatMessage(
-      text: "주제가 알잘딱이 아니네",
-      isMe: false,
-      playerNumber: 6,
-    ),
-  ];
+  // TODO: 실제 게임 인원수에 맞게 동적으로 생성해야 함
+  final List<int> _players = [2, 3, 4, 5, 6];
+
+  // ✅ [수정] 메시지 목록을 비어있는 상태로 시작
+  final List<ChatMessage> _messages = [];
+
+  @override
+  void initState() {
+    super.initState();
+    // 화면이 그려진 후 게임 시작 다이얼로그 표시
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _showGameIntroDialog();
+    });
+
+    // ✅ [추가] GameService를 통해 이 방의 공용 채널을 구독 시작
+    _gameService.subscribeToGameChannel(
+      roomId: widget.matchData.roomId,
+      onEvent: _handleGameEvent, // 메시지가 올 때마다 _handleGameEvent 함수 실행
+    );
+  }
+
+  // ✅ [추가] 서버로부터 오는 이벤트를 처리하는 함수
+  void _handleGameEvent(GameEvent event) {
+    ChatMessage newMessage;
+
+    if (event is ChatMessageEvent) {
+      // 다른 유저가 보낸 일반 채팅 메시지
+      newMessage = ChatMessage(
+        text: event.content,
+        // 내가 보낸 메시지인지 확인 (서버가 보내준 senderNumber와 내 번호 비교)
+        isMe: event.senderNumber == widget.matchData.userRoomNumber,
+        playerNumber: event.senderNumber,
+      );
+    } else if (event is PhaseChangeEvent) {
+      // 서버가 보낸 게임 단계 변경 알림 (예: "투표가 시작되었습니다.")
+      newMessage = ChatMessage(
+        text: event.content,
+        isMe: false,
+        isSystem: true, // 시스템 메시지로 표시
+      );
+    } else {
+      // 알 수 없는 타입의 이벤트는 무시
+      return;
+    }
+
+    // 위젯이 아직 화면에 있다면, 메시지 목록에 새 메시지를 추가하고 화면 새로고침
+    if (mounted) {
+      setState(() {
+        _messages.add(newMessage);
+      });
+      _scrollToBottom(); // 새 메시지가 오면 맨 아래로 스크롤
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    // ... (build 메서드의 UI 구조는 변경 없음) ...
     return GestureDetector(
       onTap: () {
-        // 키보드 외의 영역을 터치하면 키보드 숨기기
         FocusScope.of(context).unfocus();
       },
       child: Scaffold(
         backgroundColor: Colors.white,
         body: Column(
           children: [
-            // 상단 SafeArea (보라색)
             Container(
               color: const Color(0xFF8F2AB0),
               child: SafeArea(
@@ -67,24 +99,18 @@ class _ChatScreenState extends State<ChatScreen> {
                 child: Container(),
               ),
             ),
-            // 메인 콘텐츠
             Expanded(
               child: Column(
                 children: [
-                  // 상단 헤더
                   _buildHeader(),
-                  // 게임 정보
                   _buildGameInfo(),
-                  // 채팅 메시지 리스트
                   Expanded(
                     child: _buildChatList(),
                   ),
-                  // 메시지 입력 영역
                   _buildMessageInput(),
                 ],
               ),
             ),
-            // 하단 SafeArea (회색)
             Container(
               color: Colors.grey.shade200,
               child: SafeArea(
@@ -98,22 +124,67 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  @override
-  void initState() {
-    super.initState();
-    // 게임 시작 다이얼로그 표시
+  // ✅ [수정] 메시지 전송 함수
+  void _sendMessage() {
+    final messageContent = _messageController.text.trim();
+    if (messageContent.isNotEmpty) {
+      // 내가 보낸 메시지를 내 화면에 즉시 추가
+      setState(() {
+        _messages.add(
+          ChatMessage(
+            text: messageContent,
+            isMe: true, // 내가 보낸 메시지
+            playerNumber: widget.matchData.userRoomNumber,
+          ),
+        );
+      });
+
+      // GameService를 통해 서버로 메시지 전송
+      _gameService.sendChatMessage(
+        roomId: widget.matchData.roomId,
+        senderNumber: widget.matchData.userRoomNumber,
+        content: messageContent,
+      );
+
+      _messageController.clear();
+      _scrollToBottom();
+    }
+  }
+
+  // ✅ [추가] 스크롤을 맨 아래로 내리는 함수
+  void _scrollToBottom() {
+    // 잠시 기다린 후 스크롤해야 UI가 완전히 그려진 후 정확히 이동함
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _showGameIntroDialog();
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
     });
   }
 
+  @override
+  void dispose() {
+    // ✅ [추가] 화면이 종료될 때 반드시 구독을 해제하여 메모리 누수 방지
+    _gameService.unsubscribeFromGameChannel();
+
+    _messageController.dispose();
+    _scrollController.dispose();
+    _timer?.cancel();
+    _countdownTimer?.cancel();
+    _countdownTimer = null;
+    super.dispose();
+  }
+
+  // (UI를 그리는 나머지 함수들은 이전과 거의 동일)
   Widget _buildHeader() {
     const Color purple = Color(0xFF8F2AB0);
-    
+
     return Stack(
       alignment: Alignment.center,
       children: [
-        // 보라색 상단 바
         Container(
           height: 72,
           width: double.infinity,
@@ -122,15 +193,12 @@ class _ChatScreenState extends State<ChatScreen> {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              // 왼쪽 공간 (로고는 Stack에서 독립적으로 배치)
-              // const SizedBox(width: 140), // 로고 공간 확보
               const Spacer(),
-              // 플레이어 정보
               Row(
                 children: [
-                  const Text(
-                    '1번',
-                    style: TextStyle(
+                  Text(
+                    '${widget.matchData.userRoomNumber}번',
+                    style: const TextStyle(
                       color: Colors.white,
                       fontSize: 20,
                       fontWeight: FontWeight.w600,
@@ -148,7 +216,6 @@ class _ChatScreenState extends State<ChatScreen> {
             ],
           ),
         ),
-        // 왼쪽 로고 (독립적으로 배치)
         Positioned(
           left: -10,
           top: 0,
@@ -162,7 +229,6 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
           ),
         ),
-        // 중앙 타이머
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           decoration: BoxDecoration(
@@ -188,7 +254,6 @@ class _ChatScreenState extends State<ChatScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 주제
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             decoration: BoxDecoration(
@@ -205,7 +270,6 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
           ),
           const SizedBox(height: 12),
-          // 플레이어 구성
           Row(
             children: [
               Container(
@@ -276,34 +340,32 @@ class _ChatScreenState extends State<ChatScreen> {
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
-              child: Row(
-          mainAxisAlignment: message.isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (!message.isMe) ...[
-              // 플레이어 아이콘과 번호
-              Column(
-                children: [
-                  Image.asset(
-                    'assets/InChatOthers.png',
-                    height: 30,
-                    width: 30,
-                    fit: BoxFit.contain,
+      child: Row(
+        mainAxisAlignment: message.isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (!message.isMe) ...[
+            Column(
+              children: [
+                Image.asset(
+                  'assets/InChatOthers.png',
+                  height: 30,
+                  width: 30,
+                  fit: BoxFit.contain,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '${message.playerNumber}번',
+                  style: const TextStyle(
+                    color: Color(0xFF6B46C1),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    '${message.playerNumber}번',
-                    style: const TextStyle(
-                      color: Color(0xFF6B46C1),
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(width: 8),
-            ],
-          // 메시지 버블
+                ),
+              ],
+            ),
+            const SizedBox(width: 8),
+          ],
           Flexible(
             child: Container(
               constraints: BoxConstraints(
@@ -317,7 +379,7 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
               child: Text(
                 message.text,
-                style: TextStyle(
+                style: const TextStyle(
                   color: Colors.black87,
                   fontSize: 14,
                 ),
@@ -371,32 +433,6 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  void _sendMessage() {
-    if (_messageController.text.trim().isNotEmpty) {
-      setState(() {
-        _messages.add(
-          ChatMessage(
-            text: _messageController.text.trim(),
-            isMe: true,
-            playerNumber: null,
-          ),
-        );
-        _messageController.clear();
-      });
-      
-      // 메시지 추가 후 가장 아래로 스크롤
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (_scrollController.hasClients) {
-          _scrollController.animateTo(
-            _scrollController.position.maxScrollExtent,
-            duration: const Duration(milliseconds: 300),
-            curve: Curves.easeOut,
-          );
-        }
-      });
-    }
-  }
-
   void _showGameIntroDialog() {
     showDialog(
       context: context,
@@ -404,7 +440,6 @@ class _ChatScreenState extends State<ChatScreen> {
       builder: (BuildContext context) {
         return StatefulBuilder(
           builder: (context, setDialogState) {
-            // 5초 카운트다운 시작 (다이얼로그가 열릴 때만)
             if (_countdownTimer == null) {
               _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
                 setDialogState(() {
@@ -419,7 +454,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 });
               });
             }
-            
+
             return AlertDialog(
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(20),
@@ -428,7 +463,6 @@ class _ChatScreenState extends State<ChatScreen> {
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // 게임 아이콘
                   Container(
                     width: 80,
                     height: 80,
@@ -443,7 +477,6 @@ class _ChatScreenState extends State<ChatScreen> {
                     ),
                   ),
                   const SizedBox(height: 20),
-                  // 게임 제목
                   const Text(
                     'Bluffing',
                     style: TextStyle(
@@ -453,7 +486,6 @@ class _ChatScreenState extends State<ChatScreen> {
                     ),
                   ),
                   const SizedBox(height: 20),
-                  // 게임 설명
                   Container(
                     padding: const EdgeInsets.all(20),
                     decoration: BoxDecoration(
@@ -512,7 +544,6 @@ class _ChatScreenState extends State<ChatScreen> {
                     ),
                   ),
                   const SizedBox(height: 24),
-                  // 카운트다운 진행 표시
                   Container(
                     width: double.infinity,
                     padding: const EdgeInsets.symmetric(vertical: 16),
@@ -540,7 +571,6 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _startGame() {
-    // 3분 타이머 시작
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
       setState(() {
         if (_remainingSeconds > 0) {
@@ -554,7 +584,6 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _endGame() {
-    // 투표 다이얼로그 표시
     _showVoteDialog();
   }
 
@@ -578,7 +607,6 @@ class _ChatScreenState extends State<ChatScreen> {
                 ),
                 child: Column(
                   children: [
-                    // 투표 안내 텍스트 (검정색 배경)
                     Container(
                       width: double.infinity,
                       padding: const EdgeInsets.all(24),
@@ -611,7 +639,6 @@ class _ChatScreenState extends State<ChatScreen> {
                         ],
                       ),
                     ),
-                    // 플레이어 선택 카드들 (흰색 배경)
                     Expanded(
                       child: Center(
                         child: Padding(
@@ -619,7 +646,6 @@ class _ChatScreenState extends State<ChatScreen> {
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              // 첫 번째 행 (2개 카드)
                               Row(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
@@ -629,7 +655,6 @@ class _ChatScreenState extends State<ChatScreen> {
                                 ],
                               ),
                               const SizedBox(height: 10),
-                              // 두 번째 행 (3개 카드)
                               Row(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
@@ -645,7 +670,6 @@ class _ChatScreenState extends State<ChatScreen> {
                         ),
                       ),
                     ),
-                    // 투표 대기 메시지와 버튼 (흰색 배경)
                     Padding(
                       padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
                       child: Column(
@@ -659,7 +683,6 @@ class _ChatScreenState extends State<ChatScreen> {
                             ),
                           ),
                           const SizedBox(height: 24),
-                          // 투표 버튼
                           SizedBox(
                             width: double.infinity,
                             child: ElevatedButton(
@@ -697,7 +720,7 @@ class _ChatScreenState extends State<ChatScreen> {
   Widget _buildVoteCard(int index, StateSetter setDialogState) {
     final playerNumber = _players[index];
     final isSelected = _selectedPlayer == playerNumber;
-    
+
     return GestureDetector(
       onTap: () {
         setDialogState(() {
@@ -717,7 +740,6 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
         child: Column(
           children: [
-            // 아이콘 영역 (흰색 배경)
             Expanded(
               flex: 3,
               child: Container(
@@ -732,7 +754,6 @@ class _ChatScreenState extends State<ChatScreen> {
                 ),
                 child: Stack(
                   children: [
-                    // 플레이어 아이콘
                     Center(
                       child: Image.asset(
                         'assets/voteCardIcon.png',
@@ -741,7 +762,6 @@ class _ChatScreenState extends State<ChatScreen> {
                         fit: BoxFit.contain,
                       ),
                     ),
-                    // 선택된 경우 체크마크
                     if (isSelected)
                       Positioned(
                         top: 8,
@@ -764,7 +784,6 @@ class _ChatScreenState extends State<ChatScreen> {
                 ),
               ),
             ),
-            // 번호 영역 (검은색 배경)
             Container(
               width: double.infinity,
               padding: const EdgeInsets.symmetric(vertical: 2),
@@ -793,9 +812,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   void _submitVote() {
     if (_selectedPlayer != null) {
-      // 다이얼로그 닫기
       Navigator.of(context).pop();
-      // 패배 화면으로 이동
       Navigator.of(context).push(
         MaterialPageRoute(
           builder: (context) => const LoseScreen(),
@@ -809,16 +826,6 @@ class _ChatScreenState extends State<ChatScreen> {
     int minutes = seconds ~/ 60;
     int remainingSeconds = seconds % 60;
     return '${minutes.toString().padLeft(1, '0')}:${remainingSeconds.toString().padLeft(2, '0')}';
-  }
-
-  @override
-  void dispose() {
-    _messageController.dispose();
-    _scrollController.dispose();
-    _timer?.cancel();
-    _countdownTimer?.cancel();
-    _countdownTimer = null;
-    super.dispose();
   }
 }
 
