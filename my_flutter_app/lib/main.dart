@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
-
+import 'package:bluffing_frontend/screens/signup_screen.dart';
+import 'package:bluffing_frontend/screens/login_screen.dart';
+import 'package:bluffing_frontend/screens/home_screen.dart';
 void main() {
   runApp(const MyApp());
 }
+
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
@@ -30,7 +33,13 @@ class MyApp extends StatelessWidget {
         // tested with just a hot reload.
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
       ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
+      home: const HomeScreen(),
+
+
+      //const SignupScreen(),
+
+
+      //@@@@2const MyHomePage(title: 'Flutter Demo Home Page'),
     );
   }
 }
