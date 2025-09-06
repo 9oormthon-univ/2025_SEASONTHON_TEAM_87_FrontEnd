@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../widgets/custom_app_bar.dart';
 import '../widgets/join_game_card.dart';
 import '../widgets/user_profile_card.dart';
+import 'chat_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -44,10 +45,12 @@ class _HomeScreenState extends State<HomeScreen> {
         });
       } else {
         timer.cancel();
-        // TODO: 매칭 완료 후 게임 화면으로 이동하는 로직 추가
-        setState(() {
-          _isMatching = false; // 매칭 상태 해제 (예시)
-        });
+        // 매칭 완료 후 ChatScreen으로 이동
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(
+            builder: (context) => const ChatScreen(),
+          ),
+        );
       }
     });
   }
