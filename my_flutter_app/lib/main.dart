@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:bluffing_frontend/screens/signup_screen.dart';
-import 'package:bluffing_frontend/screens/login_screen.dart';
-import 'package:bluffing_frontend/screens/home_screen.dart';
+import 'screens/signup_screen.dart';
+import 'screens/login_screen.dart';
+import 'screens/home_screen.dart';
 void main() {
   runApp(const MyApp());
 }
@@ -18,7 +18,7 @@ class MyApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.purple),
         useMaterial3: true,
       ),
-      home: const HomeScreen(),
+      home: const LoginScreen(),
 
 
       //const SignupScreen(),
