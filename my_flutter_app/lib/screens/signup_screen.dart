@@ -1,3 +1,4 @@
+import 'package:bluffing_frontend/services/api_service.dart';
 import 'package:flutter/material.dart';
 
 class SignupScreen extends StatefulWidget {
@@ -18,16 +19,15 @@ class _SignupScreenState extends State<SignupScreen> {
   String? _selectedYear;
   String? _selectedMonth;
   String? _selectedDay;
-
-  // Dropdown 메뉴 아이템 리스트 생성
-  final List<String> _years =
-  List.generate(100, (index) => (DateTime.now().year - index).toString());
+  final List<String> _years = List.generate(100, (index) => (DateTime.now().year - index).toString());
   final List<String> _months = List.generate(12, (index) => (index + 1).toString().padLeft(2, '0'));
   final List<String> _days = List.generate(31, (index) => (index + 1).toString().padLeft(2, '0'));
 
+  // 로딩 관리 변수
+  bool _isLoading = false;
+
   @override
   void dispose() {
-    // 위젯이 제거될 때 컨트롤러를 정리합니다.
     _nameController.dispose();
     _idController.dispose();
     _passwordController.dispose();
@@ -35,13 +35,83 @@ class _SignupScreenState extends State<SignupScreen> {
     super.dispose();
   }
 
+  // 회원가입 로직 (반환값 처리 로직 수정)
+  Future<void> _handleSignup() async {
+    // 1. 유효성 검사
+    if (_nameController.text.isEmpty ||
+        _idController.text.isEmpty ||
+        _passwordController.text.isEmpty ||
+        _selectedYear == null || _selectedMonth == null || _selectedDay == null) {
+      _showErrorDialog('모든 필드를 입력해주세요.');
+      return;
+    }
+    if (_passwordController.text != _confirmPasswordController.text) {
+      _showErrorDialog('비밀번호가 일치하지 않습니다.');
+      return;
+    }
+
+    // 2. 로딩 상태 시작 및 API 호출
+    setState(() { _isLoading = true; });
+
+    final String birthDate = '$_selectedYear-$_selectedMonth-$_selectedDay';
+
+    final String? errorMessage = await ApiService.signup(
+      name: _nameController.text,
+      birth: birthDate,
+      loginId: _idController.text,
+      password: _passwordController.text,
+    );
+
+    if (!mounted) return;
+    setState(() { _isLoading = false; });
+
+    // 3. 결과 처리
+    if (errorMessage == null) {
+      // errorMessage가 null이면 성공
+      showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => AlertDialog(
+            title: const Text('회원가입 성공'),
+            content: const Text('로그인 화면으로 이동합니다.'),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.of(context).pop();
+                  Navigator.of(context).pop();
+                },
+                child: const Text('확인'),
+              )
+            ],
+          ));
+    } else {
+      // errorMessage가 있으면 실패! 서버가 보내준 메시지를 그대로 보여줌
+      _showErrorDialog(errorMessage);
+    }
+  }
+
+  // UI 피드백을 위한 헬퍼 함수
+  void _showErrorDialog(String message) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('알림'),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('확인'),
+          )
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    // 디자인에 사용된 기본 보라색 정의
-    const primaryColor = Color(0xFF6A1B9A); // 약간 더 진한 보라색으로 조정
+    const primaryColor = Color(0xFF6A1B9A);
 
     return Scaffold(
-      // ✅ 키보드가 올라오거나 화면이 작을 때 UI가 잘리지 않도록 스크롤 기능을 추가합니다.
       body: SingleChildScrollView(
         child: SafeArea(
           child: Padding(
@@ -57,29 +127,23 @@ class _SignupScreenState extends State<SignupScreen> {
                   ),
                 ),
                 const SizedBox(height: 40),
-
-                // 이름 입력 섹션
                 _buildTextFieldSection(
                   label: '이름',
                   controller: _nameController,
                   hintText: '이름을 입력하세요',
                 ),
-
-                // 생년월일 입력 섹션
                 _buildBirthDateSection(),
-
-                // 아이디 입력 섹션
-                _buildIdSection(primaryColor),
-
-                // 비밀번호 입력 섹션
+                _buildTextFieldSection(
+                  label: '아이디',
+                  controller: _idController,
+                  hintText: '아이디를 입력하세요',
+                ),
                 _buildTextFieldSection(
                   label: '비밀번호',
                   controller: _passwordController,
                   hintText: '비밀번호를 입력하세요',
                   isObscure: true,
                 ),
-
-                // 비밀번호 확인 섹션
                 _buildTextFieldSection(
                   label: '비밀번호 확인',
                   controller: _confirmPasswordController,
@@ -93,20 +157,16 @@ class _SignupScreenState extends State<SignupScreen> {
                   width: double.infinity,
                   height: 50,
                   child: ElevatedButton(
-                    onPressed: () {
-                      // TODO: 회원가입 로직 구현
-                      print('회원가입 정보 확인');
-                      print('이름: ${_nameController.text}');
-                      print('아이디: ${_idController.text}');
-                      print('생년월일: $_selectedYear-$_selectedMonth-$_selectedDay');
-                    },
+                    onPressed: _handleSignup,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: primaryColor,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8.0),
                       ),
                     ),
-                    child: const Text(
+                    child: _isLoading
+                        ? const CircularProgressIndicator(color: Colors.white)
+                        : const Text(
                       '확인',
                       style: TextStyle(
                         fontSize: 18,
@@ -125,7 +185,7 @@ class _SignupScreenState extends State<SignupScreen> {
                     const Text('계정이 있으신가요?', style: TextStyle(color: Colors.grey)),
                     TextButton(
                       onPressed: () {
-                        // TODO: 로그인 화면으로 이동
+                        Navigator.of(context).pop();
                       },
                       child: const Text(
                         '로그인',
@@ -173,57 +233,6 @@ class _SignupScreenState extends State<SignupScreen> {
               borderSide: BorderSide.none,
             ),
           ),
-        ),
-        const SizedBox(height: 24),
-      ],
-    );
-  }
-
-  // 아이디 입력 + 중복확인 버튼 섹션
-  Widget _buildIdSection(Color primaryColor) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          '아이디',
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
-        ),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            Expanded(
-              child: TextFormField(
-                controller: _idController,
-                decoration: InputDecoration(
-                  hintText: '아이디를 입력하세요',
-                  hintStyle: TextStyle(color: Colors.grey[400]),
-                  filled: true,
-                  fillColor: Colors.grey[200],
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8.0),
-                    borderSide: BorderSide.none,
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            OutlinedButton(
-              onPressed: () {
-                // TODO: 아이디 중복 확인 로직 구현
-              },
-              style: OutlinedButton.styleFrom(
-                side: BorderSide(color: primaryColor),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8.0),
-                ),
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
-              ),
-              child: Text(
-                '중복확인',
-                style: TextStyle(color: primaryColor),
-              ),
-            ),
-          ],
         ),
         const SizedBox(height: 24),
       ],
