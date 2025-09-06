@@ -15,6 +15,9 @@ dependencies:
 
   # ✅ STOMP 통신을 위해 필요합니다. (다음 단계에서 사용)
   stomp_dart_client: ^1.0.1
+  
+  # ✅ JWT 토큰 저장을 위해 필요합니다.
+  shared_preferences: ^2.2.2
 
   cupertino_icons: ^1.0.8
   # google_fonts, font_awesome_flutter는 제거했습니다.

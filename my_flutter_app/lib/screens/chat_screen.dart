@@ -2,9 +2,18 @@ import 'package:flutter/material.dart';
 import 'dart:async';
 import 'victory_screen.dart';
 import 'lose_screen.dart';
+import '../services/stomp_service.dart';
+import '../services/game_api_service.dart';
 
 class ChatScreen extends StatefulWidget {
-  const ChatScreen({super.key});
+  final String roomId;
+  final int userNumber;
+  
+  const ChatScreen({
+    super.key,
+    required this.roomId,
+    required this.userNumber,
+  });
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -17,8 +26,13 @@ class _ChatScreenState extends State<ChatScreen> {
   Timer? _countdownTimer;
   int _remainingSeconds = 1; // 3분 = 180초
   int _countdownSeconds = 1; // 5초 카운트다운
-  int? _selectedPlayer;
-  final List<int> _players = [2, 3, 4, 5, 6]; // 1번은 현재 플레이어이므로 제외
+  
+  // STOMP 및 게임 상태 관리
+  final StompService _stompService = StompService.instance;
+  final GameState _gameState = GameState();
+  StreamSubscription<Map<String, dynamic>>? _messageSubscription;
+  String? _roomId;
+  int _userNumber = 1; // 임시로 1번으로 설정
   
   final List<ChatMessage> _messages = [
     ChatMessage(
@@ -101,10 +115,227 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void initState() {
     super.initState();
-    // 게임 시작 다이얼로그 표시
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _showGameIntroDialog();
+    _initializeGame();
+  }
+  
+  Future<void> _initializeGame() async {
+    // 홈 화면에서 받은 정보 사용
+    _roomId = widget.roomId;
+    _userNumber = widget.userNumber;
+    
+    // STOMP 연결
+    final endpoints = [
+      'ws://ec2-13-125-117-232.ap-northeast-2.compute.amazonaws.com:8080/ws',
+    ];
+    
+    bool connected = false;
+    for (final endpoint in endpoints) {
+      print('WebSocket 연결 시도: $endpoint');
+      connected = await _stompService.connect(baseUrl: endpoint);
+      if (connected) {
+        print('WebSocket 연결 성공: $endpoint');
+        break;
+      }
+    }
+    
+    if (connected && _roomId != null) {
+      // 방 구독
+      await _stompService.subscribeToRoom(_roomId!);
+      
+      // 메시지 스트림 구독
+      _messageSubscription = _stompService.messageStream.listen(_handleMessage);
+      
+      // 20초 대기 후 Ready 요청 (명세에 따라)
+      print('20초 후 게임을 시작합니다...');
+      await Future.delayed(const Duration(seconds: 20));
+      
+      // Ready 요청
+      await _sendReady();
+      
+      // 게임 시작 다이얼로그 표시
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _showGameIntroDialog();
+      });
+    } else {
+      print('STOMP 연결 실패');
+    }
+  }
+  
+  
+  Future<void> _sendReady() async {
+    if (_roomId == null) return;
+    
+    final response = await GameApiService.ready(_roomId!);
+    if (response.success) {
+      print('Ready request sent successfully');
+    } else {
+      print('Ready request failed: ${response.error}');
+    }
+  }
+  
+  void _handleMessage(Map<String, dynamic> message) {
+    // 명세에 따른 메시지 타입 분기
+    if (message['phase'] != null) {
+      // GamePhaseChangeResponse - 페이즈 변경
+      _handlePhaseChange(GamePhaseChangeResponse.fromJson(message));
+    } else if (message['voteResult'] != null) {
+      // GameVoteResultResponse - 투표 결과
+      _handleVoteResult(GameVoteResultResponse.fromJson(message));
+    } else if (message['senderNumber'] != null && message['massageReference'] == 'USER') {
+      // GameChatMessageResponse - 사용자 채팅
+      _handleChatMessage(GameChatMessageResponse.fromJson(message));
+    } else if (message['content'] != null && message['massageReference'] == 'SERVER') {
+      // 서버 메시지 (게임 시작, 페이즈 변경 알림 등)
+      _handleServerMessage(message);
+    } else {
+      print('Unknown message format: $message');
+    }
+  }
+  
+  void _handlePhaseChange(GamePhaseChangeResponse response) {
+    if (!mounted) return;
+    
+    setState(() {
+      _gameState.updateFromPhaseChange(response);
+      _remainingSeconds = _gameState.remainingTime;
     });
+    
+    // 페이즈별 처리
+    switch (response.phase) {
+      case 'CHAT':
+        _startChatPhase();
+        break;
+      case 'VOTE':
+        _startVotePhase();
+        break;
+      case 'VOTE_RESULT':
+        _showVoteResult();
+        break;
+      case 'END':
+        _endGame();
+        break;
+    }
+  }
+  
+  void _handleVoteResult(GameVoteResultResponse response) {
+    if (!mounted) return;
+    
+    setState(() {
+      _gameState.updateFromVoteResult(response);
+    });
+    
+    // 투표 결과 처리
+    if (response.winnerTeam != null) {
+      // 게임 종료 - 승부 결과에 따라 화면 이동
+      if (response.winnerTeam == _gameState.userTeam) {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (context) => const VictoryScreen()),
+        );
+      } else {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (context) => const LoseScreen()),
+        );
+      }
+    }
+  }
+  
+  void _handleChatMessage(GameChatMessageResponse response) {
+    if (!mounted) return;
+    
+    setState(() {
+      _messages.add(ChatMessage(
+        text: response.content,
+        isMe: response.senderNumber == _userNumber,
+        playerNumber: response.senderNumber == _userNumber ? null : response.senderNumber,
+      ));
+    });
+    
+    // 메시지 추가 후 스크롤
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
+  
+  // 서버 메시지 처리 (게임 시작, 페이즈 변경 알림 등)
+  void _handleServerMessage(Map<String, dynamic> message) {
+    if (!mounted) return;
+    
+    final content = message['content'] as String?;
+    print('Server message: $content');
+    
+    // 서버 메시지를 채팅에 표시
+    setState(() {
+      _messages.add(ChatMessage(
+        text: '[서버] $content',
+        isMe: false,
+        playerNumber: null,
+        isServerMessage: true,
+      ));
+    });
+    
+    // 메시지 추가 후 스크롤
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
+  
+  void _startChatPhase() {
+    // 채팅 페이즈 시작
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      
+      setState(() {
+        if (_remainingSeconds > 0) {
+          _remainingSeconds--;
+        } else {
+          timer.cancel();
+        }
+      });
+    });
+  }
+  
+  void _startVotePhase() {
+    // 투표 페이즈 시작
+    _timer?.cancel();
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      
+      setState(() {
+        if (_remainingSeconds > 0) {
+          _remainingSeconds--;
+        } else {
+          timer.cancel();
+        }
+      });
+    });
+  }
+  
+  void _showVoteResult() {
+    // 투표 결과 표시
+    _timer?.cancel();
+  }
+  
+  void _endGame() {
+    // 게임 종료
+    _timer?.cancel();
   }
 
   Widget _buildHeader() {
@@ -372,28 +603,15 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _sendMessage() {
-    if (_messageController.text.trim().isNotEmpty) {
-      setState(() {
-        _messages.add(
-          ChatMessage(
-            text: _messageController.text.trim(),
-            isMe: true,
-            playerNumber: null,
-          ),
-        );
-        _messageController.clear();
-      });
+    if (_messageController.text.trim().isNotEmpty && _roomId != null) {
+      // STOMP를 통해 채팅 메시지 전송
+      _stompService.sendChatMessage(
+        roomId: _roomId!,
+        content: _messageController.text.trim(),
+        senderNumber: _userNumber,
+      );
       
-      // 메시지 추가 후 가장 아래로 스크롤
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (_scrollController.hasClients) {
-          _scrollController.animateTo(
-            _scrollController.position.maxScrollExtent,
-            duration: const Duration(milliseconds: 300),
-            curve: Curves.easeOut,
-          );
-        }
-      });
+      _messageController.clear();
     }
   }
 
@@ -553,256 +771,7 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
-  void _endGame() {
-    // 투표 다이얼로그 표시
-    _showVoteDialog();
-  }
 
-  void _showVoteDialog() {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (BuildContext context) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            return Dialog(
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Container(
-                width: MediaQuery.of(context).size.width * 0.9,
-                height: MediaQuery.of(context).size.height * 0.65,
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Column(
-                  children: [
-                    // 투표 안내 텍스트 (검정색 배경)
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(24),
-                      decoration: const BoxDecoration(
-                        color: Colors.black,
-                        borderRadius: BorderRadius.only(
-                          topLeft: Radius.circular(10),
-                          topRight: Radius.circular(10),
-                        ),
-                      ),
-                      child: const Column(
-                        children: [
-                          Text(
-                            '투표 시간입니다',
-                            style: TextStyle(
-                              color: Color(0xFF33FF00),
-                              fontSize: 24,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          SizedBox(height: 8),
-                          Text(
-                            '15초간 40대를 맞춰보세요!',
-                            style: TextStyle(
-                              color: Color(0xFF33FF00),
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    // 플레이어 선택 카드들 (흰색 배경)
-                    Expanded(
-                      child: Center(
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 24),
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              // 첫 번째 행 (2개 카드)
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  _buildVoteCard(0, setDialogState),
-                                  const SizedBox(width: 10),
-                                  _buildVoteCard(1, setDialogState),
-                                ],
-                              ),
-                              const SizedBox(height: 10),
-                              // 두 번째 행 (3개 카드)
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  _buildVoteCard(2, setDialogState),
-                                  const SizedBox(width: 10),
-                                  _buildVoteCard(3, setDialogState),
-                                  const SizedBox(width: 10),
-                                  _buildVoteCard(4, setDialogState),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                    // 투표 대기 메시지와 버튼 (흰색 배경)
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
-                      child: Column(
-                        children: [
-                          const Text(
-                            '투표 기다리는 중...',
-                            style: TextStyle(
-                              color: Color(0xFF33FF00),
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          const SizedBox(height: 24),
-                          // 투표 버튼
-                          SizedBox(
-                            width: double.infinity,
-                            child: ElevatedButton(
-                              onPressed: _selectedPlayer != null ? _submitVote : null,
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: _selectedPlayer != null ? Colors.amber : Colors.grey,
-                                foregroundColor: Colors.black,
-                                padding: const EdgeInsets.symmetric(vertical: 16),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                              ),
-                              child: const Text(
-                                '투표',
-                                style: TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
-  Widget _buildVoteCard(int index, StateSetter setDialogState) {
-    final playerNumber = _players[index];
-    final isSelected = _selectedPlayer == playerNumber;
-    
-    return GestureDetector(
-      onTap: () {
-        setDialogState(() {
-          _selectedPlayer = isSelected ? null : playerNumber;
-        });
-      },
-      child: Container(
-        width: 90,
-        height: 90,
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: isSelected ? Colors.red : Colors.grey.shade300,
-            width: isSelected ? 3 : 1,
-          ),
-        ),
-        child: Column(
-          children: [
-            // 아이콘 영역 (흰색 배경)
-            Expanded(
-              flex: 3,
-              child: Container(
-                width: double.infinity,
-                margin: const EdgeInsets.all(3),
-                decoration: const BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.only(
-                    topLeft: Radius.circular(12),
-                    topRight: Radius.circular(12),
-                  ),
-                ),
-                child: Stack(
-                  children: [
-                    // 플레이어 아이콘
-                    Center(
-                      child: Image.asset(
-                        'assets/voteCardIcon.png',
-                        height: 50,
-                        width: 50,
-                        fit: BoxFit.contain,
-                      ),
-                    ),
-                    // 선택된 경우 체크마크
-                    if (isSelected)
-                      Positioned(
-                        top: 8,
-                        right: 8,
-                        child: Container(
-                          width: 24,
-                          height: 24,
-                          decoration: const BoxDecoration(
-                            color: Colors.green,
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Icon(
-                            Icons.check,
-                            color: Colors.white,
-                            size: 16,
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-            ),
-            // 번호 영역 (검은색 배경)
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 2),
-              decoration: const BoxDecoration(
-                color: Colors.black,
-                borderRadius: BorderRadius.only(
-                  bottomLeft: Radius.circular(12),
-                  bottomRight: Radius.circular(12),
-                ),
-              ),
-              child: Text(
-                '${playerNumber}번',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: isSelected ? Colors.red : Colors.white,
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _submitVote() {
-    if (_selectedPlayer != null) {
-      // 다이얼로그 닫기
-      Navigator.of(context).pop();
-      // 패배 화면으로 이동
-      Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (context) => const LoseScreen(),
-        ),
-      );
-    }
-  }
 
 
   String _formatTime(int seconds) {
@@ -818,6 +787,11 @@ class _ChatScreenState extends State<ChatScreen> {
     _timer?.cancel();
     _countdownTimer?.cancel();
     _countdownTimer = null;
+    
+    // STOMP 연결 정리
+    _messageSubscription?.cancel();
+    _stompService.disconnect();
+    
     super.dispose();
   }
 }
@@ -827,11 +801,13 @@ class ChatMessage {
   final bool isMe;
   final int? playerNumber;
   final bool isSystem;
+  final bool isServerMessage;
 
   ChatMessage({
     required this.text,
     required this.isMe,
     this.playerNumber,
     this.isSystem = false,
+    this.isServerMessage = false,
   });
 }

@@ -1,4 +1,4 @@
-import 'package:bluffing_frontend/services/api_service.dart';
+import '../services/api_service.dart';
 import 'package:flutter/material.dart';
 
 class SignupScreen extends StatefulWidget {
