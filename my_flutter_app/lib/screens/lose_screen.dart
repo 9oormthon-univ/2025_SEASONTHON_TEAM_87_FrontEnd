@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'home_screen.dart';
 
 class LoseScreen extends StatelessWidget {
   const LoseScreen({super.key});
@@ -95,11 +96,19 @@ class LoseScreen extends StatelessWidget {
                         ),
                         child: Column(
                           children: [
-                            _buildVoteResultRow('1번', '2표'),
+                            _buildVoteResultRow('1번', '0표'),
                             const SizedBox(height: 8),
-                            _buildVoteResultRow('2번', '3표'),
+                            _buildVoteResultRow('2번', '2표'),
                             const SizedBox(height: 8),
-                            _buildVoteResultRow('기권', '1표'),
+                            _buildVoteResultRow('3번', '0표'),
+                            const SizedBox(height: 8),
+                            _buildVoteResultRow('4번', '0표'),
+                            const SizedBox(height: 8),
+                            _buildVoteResultRow('5번', '0표'),
+                            const SizedBox(height: 8),
+                            _buildVoteResultRow('6번', '0표'),
+                            const SizedBox(height: 8),
+                            _buildVoteResultRow('기권', '0표'),
                           ],
                         ),
                       ),
@@ -112,7 +121,13 @@ class LoseScreen extends StatelessWidget {
                   width: MediaQuery.of(context).size.width * 0.7,
                   child: ElevatedButton(
                     onPressed: () {
-                      Navigator.of(context).pop();
+                      // 홈 화면으로 이동 (임시로 빈 토큰 사용)
+                      Navigator.of(context).pushAndRemoveUntil(
+                        MaterialPageRoute(
+                          builder: (context) => const HomeScreen(accessToken: ''),
+                        ),
+                        (route) => false,
+                      );
                     },
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.amber,

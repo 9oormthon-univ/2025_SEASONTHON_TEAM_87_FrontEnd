@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'home_screen.dart';
 
 class VictoryScreen extends StatelessWidget {
   const VictoryScreen({super.key});
@@ -112,7 +113,13 @@ class VictoryScreen extends StatelessWidget {
                   width: MediaQuery.of(context).size.width * 0.7,
                   child: ElevatedButton(
                     onPressed: () {
-                      Navigator.of(context).pop();
+                      // 홈 화면으로 이동 (임시로 빈 토큰 사용)
+                      Navigator.of(context).pushAndRemoveUntil(
+                        MaterialPageRoute(
+                          builder: (context) => const HomeScreen(accessToken: ''),
+                        ),
+                        (route) => false,
+                      );
                     },
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.amber,

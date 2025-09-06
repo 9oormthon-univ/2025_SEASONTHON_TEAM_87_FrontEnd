@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:bluffing_frontend/services/game_service.dart';
 import 'package:bluffing_frontend/services/api_service.dart';
 import 'lose_screen.dart';
+import 'victory_screen.dart';
 
 class ChatScreen extends StatefulWidget {
   final MatchSuccessResponse matchData;
@@ -27,8 +28,8 @@ class _ChatScreenState extends State<ChatScreen> {
   Timer? _timer;
   Timer? _countdownTimer;
   Timer? _connectionCheckTimer;
-  int _remainingSeconds = 180;
-  int _countdownSeconds = 3;
+  int _remainingSeconds = 30;
+  int _countdownSeconds = 10;
   bool _isReady = false;
   int? _selectedPlayer;
   // TODO: 실제 게임 인원수에 맞게 동적으로 생성해야 함
@@ -1018,17 +1019,29 @@ class _ChatScreenState extends State<ChatScreen> {
         
         if (success) {
           print('✅ 투표 제출 성공');
-          Navigator.of(context).pop();
-          // 투표 결과는 STOMP로 받아옴
+          Navigator.of(context).pop(); // 투표 다이얼로그 닫기
+          
+          // ✅ 임시로 결과 화면으로 이동
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(
+              builder: (context) => const VictoryScreen(),
+            ),
+          );
         } else {
           print('❌ 투표 제출 실패');
-          // 에러 처리
+          // 투표 실패 시 LoseScreen으로 이동
+          Navigator.of(context).pop(); // 투표 다이얼로그 닫기
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(
+              builder: (context) => const LoseScreen(),
+            ),
+          );
         }
       } else {
         print('❌ 토큰이 없어 투표할 수 없습니다');
-        // 임시로 LoseScreen으로 이동 (테스트용)
-        Navigator.of(context).pop();
-        Navigator.of(context).push(
+        // 토큰 없음 시 LoseScreen으로 이동
+        Navigator.of(context).pop(); // 투표 다이얼로그 닫기
+        Navigator.of(context).pushReplacement(
           MaterialPageRoute(
             builder: (context) => const LoseScreen(),
           ),
