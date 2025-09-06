@@ -23,7 +23,6 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _handleLogin() async {
-    // ✅ [테스트] 버튼이 눌리는지 확인하기 위한 print문
     print("로그인 버튼 눌림! _handleLogin 함수 시작.");
 
     if (_isLoading) {
@@ -62,73 +61,77 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     const primaryColor = Color(0xFF8A2BE2);
-    const gradientStartColor = Color(0xFFD4B9FF);
-    const gradientEndColor = Color(0xFFE9D8FF);
+    // 그라데이션 색상은 이제 사용되지 않습니다.
+    // const gradientStartColor = Color(0xFFD4B9FF);
+    // const gradientEndColor = Color(0xFFE9D8FF);
 
     return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [gradientStartColor, gradientEndColor]),
-        ),
-        child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 40.0),
-            child: SingleChildScrollView(
-              child: Column(
-                children: [
-                  SizedBox(height: MediaQuery.of(context).size.height * 0.15),
-                  Center(child: Image.asset('assets/logo.png', width: 200)),
-                  const SizedBox(height: 60),
+      body: Stack( // ✅ [수정] Stack 위젯으로 변경하여 배경 이미지 위에 UI를 올립니다.
+        fit: StackFit.expand,
+        children: [
+          // ✅ [추가] 배경 이미지
+          Image.asset(
+            'assets/login_background.png', // ✅ [수정] 배경 이미지 파일 경로
+            fit: BoxFit.cover,
+          ),
+          // ✅ [수정] 기존 Container의 내용은 Stack의 자식으로 옮겨집니다.
+          SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 40.0),
+              child: SingleChildScrollView(
+                child: Column(
+                  children: [
+                    SizedBox(height: MediaQuery.of(context).size.height * 0.15),
+                    Center(child: Image.asset('assets/logo.png', width: 200)),
+                    const SizedBox(height: 60),
 
-                  _buildTextField(label: '아이디', controller: _idController),
-                  const SizedBox(height: 20),
+                    _buildTextField(label: '아이디', controller: _idController),
+                    const SizedBox(height: 20),
 
-                  _buildTextField(label: '비밀번호', controller: _passwordController, isObscure: true),
-                  const SizedBox(height: 40),
+                    _buildTextField(label: '비밀번호', controller: _passwordController, isObscure: true),
+                    const SizedBox(height: 40),
 
-                  SizedBox(
-                    width: double.infinity,
-                    height: 50,
-                    child: ElevatedButton(
-                      onPressed: _handleLogin,
-                      style: ElevatedButton.styleFrom(
-                          backgroundColor: primaryColor,
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8.0))),
-                      child: _isLoading
-                          ? const CircularProgressIndicator(color: Colors.white)
-                          : const Text('로그인',
-                          style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white)),
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text('계정이 없으신가요?',
-                          style: TextStyle(color: Colors.grey.shade600)),
-                      TextButton(
-                        onPressed: () {
-                          Navigator.push(context, MaterialPageRoute(builder: (context) => const SignupScreen()));
-                        },
-                        child: const Text('회원가입',
+                    SizedBox(
+                      width: double.infinity,
+                      height: 50,
+                      child: ElevatedButton(
+                        onPressed: _handleLogin,
+                        style: ElevatedButton.styleFrom(
+                            backgroundColor: primaryColor,
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8.0))),
+                        child: _isLoading
+                            ? const CircularProgressIndicator(color: Colors.white)
+                            : const Text('로그인',
                             style: TextStyle(
-                                fontWeight: FontWeight.bold, color: Colors.black)),
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white)),
                       ),
-                    ],
-                  ),
-                ],
+                    ),
+                    const SizedBox(height: 20),
+
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text('계정이 없으신가요?',
+                            style: TextStyle(color: Colors.grey.shade600)),
+                        TextButton(
+                          onPressed: () {
+                            Navigator.push(context, MaterialPageRoute(builder: (context) => const SignupScreen()));
+                          },
+                          child: const Text('회원가입',
+                              style: TextStyle(
+                                  fontWeight: FontWeight.bold, color: Colors.black)),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
-        ),
+        ],
       ),
     );
   }
