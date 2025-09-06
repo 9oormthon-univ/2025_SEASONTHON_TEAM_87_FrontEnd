@@ -1,6 +1,7 @@
-import 'package:bluffing_frontend/screens/home_screen.dart';
-import 'package:bluffing_frontend/screens/signup_screen.dart';
-import 'package:bluffing_frontend/services/api_service.dart';
+import 'home_screen.dart';
+import 'signup_screen.dart';
+import '../services/api_service.dart';
+import '../services/token_service.dart';
 import 'package:flutter/material.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -46,9 +47,12 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     if (accessToken != null) {
+      // 토큰을 TokenService에 저장
+      await TokenService.instance.saveTokens(accessToken: accessToken);
+      
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(builder: (context) => HomeScreen(accessToken: accessToken)),
+        MaterialPageRoute(builder: (context) => const HomeScreen()),
       );
     } else {
       showDialog(

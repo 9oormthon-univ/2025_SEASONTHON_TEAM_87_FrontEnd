@@ -1,6 +1,9 @@
 // ✅ [수정] dart.async -> dart:async 오타 수정
 import 'dart:async';
-import 'package:bluffing_frontend/services/api_service.dart';
+import '../services/api_service.dart';
+import '../services/token_service.dart';
+import '../services/stomp_service.dart';
+import '../services/game_api_service.dart';
 import 'package:flutter/material.dart';
 import '../widgets/custom_app_bar.dart';
 import '../widgets/join_game_card.dart';
@@ -8,18 +11,18 @@ import '../widgets/user_profile_card.dart';
 import 'chat_screen.dart';
 
 class HomeScreen extends StatefulWidget {
-  final String accessToken;
-
-  const HomeScreen({super.key, required this.accessToken});
+  const HomeScreen({super.key});
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  final StompService _stompService = StompService.instance;
   bool _isMatching = false;
-  Timer? _timer;
-  int _countdown = 5;
+  String? _roomId;
+  int? _userNumber;
+  StreamSubscription? _messageSubscription;
 
   bool _isLoading = true;
   String _userName = "로딩 중...";
@@ -37,16 +40,23 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
-    _timer?.cancel();
+    _messageSubscription?.cancel();
+    _stompService.disconnect();
     super.dispose();
   }
 
   Future<void> _loadUserProfile() async {
     try {
+      final token = await TokenService.instance.getAccessToken();
+      if (token == null) {
+        print('No access token available for user profile');
+        return;
+      }
+      
       // 5초의 타임아웃 설정
       final results = await Future.wait([
-        ApiService.getUserSummary(widget.accessToken),
-        ApiService.getUserRecord(widget.accessToken),
+        ApiService.getUserSummary(token),
+        ApiService.getUserRecord(token),
       ]).timeout(const Duration(seconds: 5));
 
       final summary = results[0] as UserSummary?;
@@ -75,26 +85,107 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  void _startMatching() {
+  void _startMatching() async {
     setState(() {
       _isMatching = true;
-      _countdown = 5;
     });
 
-    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (_countdown > 0) {
-        setState(() {
-          _countdown--;
-        });
-      } else {
-        timer.cancel();
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(
-            builder: (context) => const ChatScreen(),
-          ),
-        );
+    // 바로 매칭 시작
+    _startActualMatching();
+  }
+
+  Future<void> _startActualMatching() async {
+    try {
+      print('🚀 매칭 프로세스 시작');
+      
+      // 1. STOMP 연결
+      print('🔗 STOMP 연결 시도 중...');
+      final connected = await _stompService.connect(
+        baseUrl: 'ws://ec2-13-125-117-232.ap-northeast-2.compute.amazonaws.com:8080/ws'
+      );
+      
+      if (!connected) {
+        print('❌ STOMP 연결 실패');
+        _showErrorDialog('연결에 실패했습니다. 다시 시도해주세요.');
+        return;
       }
+      print('✅ STOMP 연결 성공!');
+
+      // 2. 매칭 알림 구독
+      print('🔔 매칭 알림 구독 시작...');
+      await _stompService.subscribeToMatchNotification();
+      
+      // 3. 메시지 스트림 구독
+      print('📡 메시지 스트림 구독 시작...');
+      _messageSubscription = _stompService.messageStream.listen(_handleMessage);
+      
+      // 4. 매칭 요청 (STOMP 방식)
+      print('🎮 게임 매칭 요청 전송 (STOMP)...');
+      await _stompService.sendMatchRequest();
+      print('✅ 매칭 요청 전송 완료! 매칭 결과 대기 중...');
+    } catch (e) {
+      print('❌ 매칭 중 오류 발생: $e');
+      _showErrorDialog('매칭 중 오류가 발생했습니다: $e');
+    }
+  }
+
+  // 매칭 결과 처리
+  void _handleMessage(Map<String, dynamic> message) {
+    if (message['userRoomNumber'] != null && message['team'] != null) {
+      // GameMatchedResponse - 매칭 완료
+      _handleMatchResult(GameMatchedResponse.fromJson(message));
+    }
+  }
+
+  // 매칭 결과 처리
+  void _handleMatchResult(GameMatchedResponse response) {
+    if (!mounted) return;
+    
+    print('🎉 매칭 완료!');
+    print('🆔 방 번호: ${response.userRoomNumber}');
+    print('👥 팀: ${response.team}');
+    print('🎂 나이: ${response.userAge}');
+    print('🏠 시민팀 나이: ${response.citizenTeamAgeList}');
+    print('🕵️ 마피아팀 나이: ${response.mafiaTeamAge}');
+    
+    // 사용자 정보 저장
+    _userNumber = response.userRoomNumber;
+    _roomId = '11111111-2222-3333-4444-555555555555'; // 임시 방 ID
+    
+    print('🚀 채팅 화면으로 이동 중...');
+    
+    // 채팅 화면으로 이동
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+        builder: (context) => ChatScreen(
+          roomId: _roomId!,
+          userNumber: _userNumber!,
+        ),
+      ),
+    );
+  }
+
+  // 에러 다이얼로그
+  void _showErrorDialog(String message) {
+    if (!mounted) return;
+    
+    setState(() {
+      _isMatching = false;
     });
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('오류'),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('확인'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -162,18 +253,20 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildMatchingIndicator() {
     return Column(
       children: [
-        const Text('매칭 중입니다...', style: TextStyle(color: Colors.white, fontSize: 18)),
+        const CircularProgressIndicator(
+          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+          strokeWidth: 3,
+        ),
+        const SizedBox(height: 16),
+        const Text(
+          '매칭 중입니다...',
+          style: TextStyle(color: Colors.white, fontSize: 18),
+        ),
         const SizedBox(height: 8),
-        Text('0:0$_countdown', style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
-        const SizedBox(height: 12),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 40.0),
-          child: LinearProgressIndicator(
-            value: _countdown / 5.0,
-            backgroundColor: Colors.white.withOpacity(0.3),
-            valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
-          ),
-        )
+        const Text(
+          '잠시만 기다려주세요...',
+          style: TextStyle(color: Colors.white70, fontSize: 14),
+        ),
       ],
     );
   }
