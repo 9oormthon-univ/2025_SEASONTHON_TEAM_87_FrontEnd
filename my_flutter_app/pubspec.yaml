@@ -11,7 +11,7 @@ dependencies:
     sdk: flutter
 
   # ✅ 로그인 등 API 통신을 위해 반드시 필요합니다.
-  http: ^1.2.1
+  http: ^1.5.0
 
   # ✅ STOMP 통신을 위해 필요합니다. (다음 단계에서 사용)
   stomp_dart_client: ^1.0.1

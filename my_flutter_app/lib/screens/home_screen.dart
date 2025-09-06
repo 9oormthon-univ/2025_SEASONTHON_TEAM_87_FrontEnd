@@ -1,4 +1,6 @@
+// ✅ [수정] dart.async -> dart:async 오타 수정
 import 'dart:async';
+import 'package:bluffing_frontend/services/api_service.dart';
 import 'package:flutter/material.dart';
 import '../widgets/custom_app_bar.dart';
 import '../widgets/join_game_card.dart';
@@ -6,30 +8,71 @@ import '../widgets/user_profile_card.dart';
 import 'chat_screen.dart';
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  final String accessToken;
+
+  const HomeScreen({super.key, required this.accessToken});
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  // 화면 상태를 제어하는 변수
   bool _isMatching = false;
-
-  // 매칭 타이머 관련 변수
   Timer? _timer;
   int _countdown = 5;
 
-  // API에서 받아올 데이터 (임시)
-  String _userName = "홍길동";
-  int _winRate = 20;
-  int _wins = 1;
-  int _losses = 4;
+  bool _isLoading = true;
+  String _userName = "로딩 중...";
+  int _winRate = 0;
+  int _wins = 0;
+  int _losses = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadUserProfile();
+    });
+  }
 
   @override
   void dispose() {
-    _timer?.cancel(); // 화면이 꺼질 때 타이머 정리
+    _timer?.cancel();
     super.dispose();
+  }
+
+  Future<void> _loadUserProfile() async {
+    try {
+      // 5초의 타임아웃 설정
+      final results = await Future.wait([
+        ApiService.getUserSummary(widget.accessToken),
+        ApiService.getUserRecord(widget.accessToken),
+      ]).timeout(const Duration(seconds: 5));
+
+      final summary = results[0] as UserSummary?;
+      final record = results[1] as UserRecord?;
+
+      if (mounted) {
+        setState(() {
+          _userName = summary?.name ?? "사용자";
+          if (record != null && record.gameCount > 0) {
+            _wins = record.winCount;
+            _losses = record.lossCount;
+            _winRate = ((record.winCount / record.gameCount) * 100).toInt();
+          }
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      // 에러 발생 또는 타임아웃 시
+      print("프로필 로딩 실패: $e");
+      if (mounted) {
+        setState(() {
+          _userName = "정보 로딩 실패";
+          _isLoading = false; // 에러가 나도 로딩은 끝내야 함
+        });
+      }
+    }
   }
 
   void _startMatching() {
@@ -45,7 +88,6 @@ class _HomeScreenState extends State<HomeScreen> {
         });
       } else {
         timer.cancel();
-        // 매칭 완료 후 ChatScreen으로 이동
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(
             builder: (context) => const ChatScreen(),
@@ -68,7 +110,9 @@ class _HomeScreenState extends State<HomeScreen> {
           Scaffold(
             backgroundColor: Colors.transparent,
             appBar: CustomAppBar(userName: _userName),
-            body: Column(
+            body: _isLoading
+                ? const Center(child: CircularProgressIndicator(color: Colors.white))
+                : Column(
               children: [
                 const SizedBox(height: 20),
                 UserProfileCard(
@@ -78,16 +122,11 @@ class _HomeScreenState extends State<HomeScreen> {
                   losses: _losses,
                 ),
                 const JoinGameCard(),
-
-                // ✅ 수정된 부분: Spacer에 flex 비율을 지정합니다.
-                const Spacer(flex: 1), // 버튼 위의 공간 (비율 2)
-
+                const Spacer(flex: 1),
                 _isMatching
                     ? _buildMatchingIndicator()
                     : _buildGameStartButton(),
-
-                // ✅ 수정된 부분: 버튼 아래 공간도 Spacer로 비율을 지정합니다.
-                const Spacer(flex: 8), // 버튼 아래의 공간 (비율 1)
+                const Spacer(flex: 8),
               ],
             ),
           ),
