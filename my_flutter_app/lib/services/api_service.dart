@@ -186,4 +186,74 @@ class ApiService {
       return false;
     }
   }
+
+  // 투표 API
+  static Future<bool> postVote(String accessToken, String roomId, int votedUserNumber) async {
+    final url = Uri.parse('$_baseUrl/api/v1/game/vote');
+    try {
+      print('🗳️ 투표 API 호출');
+      print('🏠 방 ID: $roomId');
+      print('👤 투표 대상: $votedUserNumber');
+      
+      final response = await http.post(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $accessToken',
+        },
+        body: jsonEncode({
+          "chatRoomId": roomId,
+          "votedUserNumber": votedUserNumber,
+        }),
+      );
+      
+      print('🗳️ 투표 API 응답: ${response.statusCode}');
+      print('📝 응답 내용: ${response.body}');
+      
+      if (response.statusCode == 200) {
+        print('✅ 투표 성공');
+        return true;
+      } else {
+        print('❌ 투표 실패: ${response.statusCode}');
+        return false;
+      }
+    } catch (e) {
+      print('❌ 투표 API 에러: $e');
+      return false;
+    }
+  }
+
+  // 준비 API (개선된 버전)
+  static Future<bool> postReady(String accessToken, String roomId) async {
+    final url = Uri.parse('$_baseUrl/api/v1/game/ready');
+    try {
+      print('🎮 준비 API 호출');
+      print('🏠 방 ID: $roomId');
+      
+      final response = await http.post(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $accessToken',
+        },
+        body: jsonEncode({
+          "chatRoomId": roomId,
+        }),
+      );
+      
+      print('🎮 준비 API 응답: ${response.statusCode}');
+      print('📝 응답 내용: ${response.body}');
+      
+      if (response.statusCode == 200) {
+        print('✅ 준비 완료');
+        return true;
+      } else {
+        print('❌ 준비 실패: ${response.statusCode}');
+        return false;
+      }
+    } catch (e) {
+      print('❌ 준비 API 에러: $e');
+      return false;
+    }
+  }
 }

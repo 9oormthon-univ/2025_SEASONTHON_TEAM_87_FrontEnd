@@ -1,6 +1,4 @@
-import 'dart:async';
 import 'dart:convert';
-import 'package:bluffing_frontend/services/api_service.dart';
 import 'package:stomp_dart_client/stomp.dart';
 import 'package:stomp_dart_client/stomp_config.dart';
 import 'package:stomp_dart_client/stomp_frame.dart';
@@ -104,24 +102,20 @@ class GameService {
     stompClient?.subscribe(
       destination: '/user/queue/match/notify',
       callback: (frame) {
-        print("매칭 성공 메시지 수신!");
         if (frame.body != null) {
           try {
-            final data = jsonDecode(frame.body!);
-            final response = MatchSuccessResponse.fromJson(data);
-            if (response.roomId.isEmpty) throw Exception("응답에서 roomId를 찾을 수 없습니다.");
+            final body = jsonDecode(frame.body!);
+            print('✅ 매칭 알림 수신: $body');
+            
+            // MatchSuccessResponse로 파싱 시도
+            final response = MatchSuccessResponse.fromJson(body);
+            if (response.roomId.isEmpty) {
+              throw Exception("응답에서 roomId를 찾을 수 없습니다.");
+            }
 
-            print("20초 후 '준비 완료' REST API를 호출합니다.");
-            Timer(const Duration(seconds: 20), () async {
-              if (_accessToken != null) {
-                bool readySuccess = await ApiService.sendReady(accessToken: _accessToken!, chatRoomId: response.roomId);
-                if (readySuccess) {
-                  onMatchSuccess?.call(response);
-                } else {
-                  onMatchError?.call("'준비 완료' 요청에 실패했습니다.");
-                }
-              }
-            });
+            print("매칭 완료! 바로 채팅방으로 입장합니다.");
+            // 20초 대기 없이 바로 채팅방으로 입장
+            onMatchSuccess?.call(response);
           } catch (e) {
             print("매칭 성공 메시지 처리 에러: $e");
             onMatchError?.call("잘못된 매칭 데이터입니다.");

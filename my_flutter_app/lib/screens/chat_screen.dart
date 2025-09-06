@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
 import 'package:bluffing_frontend/services/game_service.dart';
+import 'package:bluffing_frontend/services/api_service.dart';
 import 'lose_screen.dart';
 
 class ChatScreen extends StatefulWidget {
@@ -24,7 +25,8 @@ class _ChatScreenState extends State<ChatScreen> {
   Timer? _timer;
   Timer? _countdownTimer;
   int _remainingSeconds = 180;
-  int _countdownSeconds = 5;
+  int _countdownSeconds = 20;
+  bool _isReady = false;
   int? _selectedPlayer;
   // TODO: 실제 게임 인원수에 맞게 동적으로 생성해야 함
   final List<int> _players = [2, 3, 4, 5, 6];
@@ -46,6 +48,8 @@ class _ChatScreenState extends State<ChatScreen> {
       roomId: widget.matchData.roomId,
       onEvent: _handleGameEvent, // 메시지가 올 때마다 _handleGameEvent 함수 실행
     );
+
+    // ✅ [제거] 자동 Ready API 호출 제거 - 준비 버튼 클릭 시에만 호출
   }
 
   // ✅ [추가] 서버로부터 오는 이벤트를 처리하는 함수
@@ -115,6 +119,34 @@ class _ChatScreenState extends State<ChatScreen> {
     });
     
     print('👋 환영 메시지 추가 완료');
+  }
+
+  // Ready API 호출
+  void _sendReadyRequest() async {
+    print('🎮 Ready API 호출 시작');
+    print('🏠 방 ID: ${widget.matchData.roomId}');
+    
+    // TODO: 실제 accessToken을 가져와야 함
+    // 현재는 임시로 빈 문자열 사용
+    final accessToken = ''; // 실제 토큰으로 교체 필요
+    
+    if (accessToken.isNotEmpty) {
+      final success = await ApiService.postReady(accessToken, widget.matchData.roomId);
+      if (success) {
+        print('✅ Ready API 호출 성공');
+        setState(() {
+          _isReady = true;
+        });
+      } else {
+        print('❌ Ready API 호출 실패');
+      }
+    } else {
+      print('⚠️ 토큰이 없어 Ready API를 호출할 수 없습니다');
+      // 테스트용으로 준비 상태만 업데이트
+      setState(() {
+        _isReady = true;
+      });
+    }
   }
 
   @override
@@ -518,6 +550,10 @@ class _ChatScreenState extends State<ChatScreen> {
                     _countdownTimer?.cancel();
                     _countdownTimer = null;
                     Navigator.of(context).pop();
+                    // 준비하지 않은 상태에서 20초가 지나면 자동으로 Ready API 호출
+                    if (!_isReady) {
+                      _sendReadyRequest();
+                    }
                     _startGame();
                   }
                 });
@@ -613,23 +649,71 @@ class _ChatScreenState extends State<ChatScreen> {
                     ),
                   ),
                   const SizedBox(height: 24),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF8F2AB0).withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: const Text(
-                      '자동으로 게임이 시작됩니다...',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 16,
-                        color: Color(0xFF8F2AB0),
-                        fontWeight: FontWeight.w600,
+                  // 준비 상태에 따른 UI 표시
+                  if (!_isReady) ...[
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      decoration: BoxDecoration(
+                        color: Colors.orange.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        '$_countdownSeconds초 뒤 게임이 시작됩니다...',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          fontSize: 16,
+                          color: Colors.orange,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
-                  ),
+                    const SizedBox(height: 16),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 50,
+                      child: ElevatedButton(
+                        onPressed: () {
+                          setDialogState(() {
+                            _isReady = true;
+                          });
+                          _sendReadyRequest();
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF8F2AB0),
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        child: const Text(
+                          '준비 완료',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ] else ...[
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      decoration: BoxDecoration(
+                        color: Colors.green.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Text(
+                        '준비 완료! 게임 시작을 기다리는 중...',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 16,
+                          color: Colors.green,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
                 ],
               ),
             );
@@ -879,14 +963,41 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  void _submitVote() {
+  void _submitVote() async {
     if (_selectedPlayer != null) {
-      Navigator.of(context).pop();
-      Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (context) => const LoseScreen(),
-        ),
-      );
+      print('🗳️ 투표 제출 시작');
+      print('👤 투표 대상: $_selectedPlayer');
+      print('🏠 방 ID: ${widget.matchData.roomId}');
+      
+      // TODO: 실제 accessToken을 가져와야 함
+      // 현재는 임시로 빈 문자열 사용
+      final accessToken = ''; // 실제 토큰으로 교체 필요
+      
+      if (accessToken.isNotEmpty) {
+        final success = await ApiService.postVote(
+          accessToken,
+          widget.matchData.roomId,
+          _selectedPlayer!,
+        );
+        
+        if (success) {
+          print('✅ 투표 제출 성공');
+          Navigator.of(context).pop();
+          // 투표 결과는 STOMP로 받아옴
+        } else {
+          print('❌ 투표 제출 실패');
+          // 에러 처리
+        }
+      } else {
+        print('❌ 토큰이 없어 투표할 수 없습니다');
+        // 임시로 LoseScreen으로 이동 (테스트용)
+        Navigator.of(context).pop();
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (context) => const LoseScreen(),
+          ),
+        );
+      }
     }
   }
 
