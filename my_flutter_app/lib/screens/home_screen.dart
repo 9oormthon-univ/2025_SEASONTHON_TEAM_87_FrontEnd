@@ -128,7 +128,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ? const Center(child: CircularProgressIndicator(color: Colors.white))
                 : Column(
               children: [
-                const SizedBox(height: 20),
+                const SizedBox(height: 100),
                 UserProfileCard(
                   userName: _userName,
                   winRate: _winRate,

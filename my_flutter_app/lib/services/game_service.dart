@@ -102,7 +102,7 @@ class GameService {
     print("STOMP 클라이언트 연결 성공!");
 
     stompClient?.subscribe(
-      destination: '/user/api/v1/game/match/notify',
+      destination: '/user/queue/match/notify',
       callback: (frame) {
         print("매칭 성공 메시지 수신!");
         if (frame.body != null) {
@@ -143,7 +143,7 @@ class GameService {
     print("게임 매칭 STOMP 메시지를 전송합니다...");
     try {
       stompClient?.send(
-        destination: '/api/v1/game/chat/match',
+        destination: '/api/v1/game/notify',
         headers: {'Authorization': 'Bearer $token'},
         body: jsonEncode({'matchCategory': 'REGULAR'}),
       );
@@ -177,7 +177,7 @@ class GameService {
     onGameEvent = onEvent;
     // ✅ [수정] subscribe가 반환하는 '구독 해제 함수'를 변수에 저장
     _gameChannelUnsubscribeCallback = stompClient?.subscribe(
-      destination: '/api/v1/game/server/room/$roomId',
+      destination: '/topic/game/room/$roomId',
       callback: (frame) {
         if (frame.body != null) {
           final data = jsonDecode(frame.body!);
@@ -185,7 +185,7 @@ class GameService {
             onGameEvent?.call(PhaseChangeEvent(phase: data['phase'], content: data['content']));
           } else if (data['massageReference'] == 'USER') {
             onGameEvent?.call(ChatMessageEvent(
-              content: data['content'],
+              content: data['message'] ?? data['content'] ?? '', // 새로운 형식: message, 기존 형식: content
               senderNumber: data['senderNumber'],
               sendTime: data['sendTime'],
             ));
@@ -222,11 +222,11 @@ class GameService {
     }
 
     stompClient?.send(
-      destination: '/api/v1/game/chat/message',
+      destination: '/api/v1/game/message',
       headers: {'Authorization': 'Bearer $token'},
       body: jsonEncode({
         'roomId': roomId,
-        'content': content,
+        'message': content,
         'senderNumber': senderNumber,
         'sendTime': DateTime.now().toIso8601String(),
       }),

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
 import 'package:bluffing_frontend/services/game_service.dart';
-import 'victory_screen.dart';
 import 'lose_screen.dart';
 
 class ChatScreen extends StatefulWidget {
@@ -39,6 +38,7 @@ class _ChatScreenState extends State<ChatScreen> {
     // 화면이 그려진 후 게임 시작 다이얼로그 표시
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _showGameIntroDialog();
+      _addWelcomeMessage();
     });
 
     // ✅ [추가] GameService를 통해 이 방의 공용 채널을 구독 시작
@@ -50,35 +50,71 @@ class _ChatScreenState extends State<ChatScreen> {
 
   // ✅ [추가] 서버로부터 오는 이벤트를 처리하는 함수
   void _handleGameEvent(GameEvent event) {
-    ChatMessage newMessage;
-
+    print('📨 게임 이벤트 수신: ${event.runtimeType}');
+    
     if (event is ChatMessageEvent) {
-      // 다른 유저가 보낸 일반 채팅 메시지
-      newMessage = ChatMessage(
+      // 채팅 메시지 처리
+      print('💬 채팅 메시지: ${event.content}');
+      print('👤 발신자: ${event.senderNumber}');
+      
+      final isMyMessage = event.senderNumber == widget.matchData.userRoomNumber;
+      
+      final newMessage = ChatMessage(
         text: event.content,
-        // 내가 보낸 메시지인지 확인 (서버가 보내준 senderNumber와 내 번호 비교)
-        isMe: event.senderNumber == widget.matchData.userRoomNumber,
-        playerNumber: event.senderNumber,
+        isMe: isMyMessage,
+        playerNumber: isMyMessage ? null : event.senderNumber,
+        isSystem: false,
+        isServerMessage: false,
+        messageReference: 'USER',
       );
+      
+      _addMessage(newMessage);
     } else if (event is PhaseChangeEvent) {
-      // 서버가 보낸 게임 단계 변경 알림 (예: "투표가 시작되었습니다.")
-      newMessage = ChatMessage(
+      // 페이즈 변경 메시지 처리
+      print('🔄 페이즈 변경: ${event.phase}');
+      print('📝 내용: ${event.content}');
+      
+      final newMessage = ChatMessage(
         text: event.content,
         isMe: false,
-        isSystem: true, // 시스템 메시지로 표시
+        isSystem: true,
+        isServerMessage: true,
+        messageReference: 'SERVER',
       );
+      
+      _addMessage(newMessage);
     } else {
-      // 알 수 없는 타입의 이벤트는 무시
-      return;
+      print('❓ 알 수 없는 이벤트 타입: ${event.runtimeType}');
     }
+  }
 
-    // 위젯이 아직 화면에 있다면, 메시지 목록에 새 메시지를 추가하고 화면 새로고침
-    if (mounted) {
-      setState(() {
-        _messages.add(newMessage);
-      });
-      _scrollToBottom(); // 새 메시지가 오면 맨 아래로 스크롤
-    }
+  // 메시지 추가 및 UI 업데이트
+  void _addMessage(ChatMessage message) {
+    if (!mounted) return;
+    
+    setState(() {
+      _messages.add(message);
+    });
+    
+    print('✅ 메시지 추가 완료. 총 메시지 수: ${_messages.length}');
+    
+    _scrollToBottom(); // 새 메시지가 오면 맨 아래로 스크롤
+  }
+
+  // 환영 메시지 추가
+  void _addWelcomeMessage() {
+    if (!mounted) return;
+    
+    setState(() {
+      _messages.add(ChatMessage(
+        text: "게임에 참여하신 것을 환영합니다! 🎮",
+        isMe: false,
+        isSystem: true,
+        isServerMessage: false,
+      ));
+    });
+    
+    print('👋 환영 메시지 추가 완료');
   }
 
   @override
@@ -124,30 +160,28 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  // ✅ [수정] 메시지 전송 함수
+  // ✅ [수정] 메시지 전송 함수 - 명세에 맞게 구현
   void _sendMessage() {
     final messageContent = _messageController.text.trim();
     if (messageContent.isNotEmpty) {
-      // 내가 보낸 메시지를 내 화면에 즉시 추가
-      setState(() {
-        _messages.add(
-          ChatMessage(
-            text: messageContent,
-            isMe: true, // 내가 보낸 메시지
-            playerNumber: widget.matchData.userRoomNumber,
-          ),
-        );
-      });
-
-      // GameService를 통해 서버로 메시지 전송
+      print('📤 채팅 메시지 전송 시작');
+      print('💬 내용: $messageContent');
+      print('🏠 방 ID: ${widget.matchData.roomId}');
+      print('👤 발신자 번호: ${widget.matchData.userRoomNumber}');
+      
+      // GameService를 통해 서버로 메시지 전송 (STOMP)
       _gameService.sendChatMessage(
         roomId: widget.matchData.roomId,
         senderNumber: widget.matchData.userRoomNumber,
         content: messageContent,
       );
 
+      // 메시지 입력창 초기화
       _messageController.clear();
-      _scrollToBottom();
+      
+      print('✅ 채팅 메시지 전송 완료');
+    } else {
+      print('❌ 채팅 메시지 전송 실패: 메시지가 비어있음');
     }
   }
 
@@ -333,6 +367,41 @@ class _ChatScreenState extends State<ChatScreen> {
               color: Colors.grey,
               fontSize: 12,
             ),
+          ),
+        ),
+      );
+    }
+
+    // 서버 메시지 처리
+    if (message.isServerMessage) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+        child: Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Colors.blue.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.blue.withOpacity(0.3)),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                Icons.info_outline,
+                color: Colors.blue[600],
+                size: 16,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  message.text,
+                  style: TextStyle(
+                    color: Colors.blue[800],
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       );
@@ -834,11 +903,33 @@ class ChatMessage {
   final bool isMe;
   final int? playerNumber;
   final bool isSystem;
+  final bool isServerMessage;
+  final String? roomId;
+  final String? sendTime;
+  final String? messageReference; // "USER" | "SERVER"
 
   ChatMessage({
     required this.text,
     required this.isMe,
     this.playerNumber,
     this.isSystem = false,
+    this.isServerMessage = false,
+    this.roomId,
+    this.sendTime,
+    this.messageReference,
   });
+
+  // GameChatMessageResponse에서 생성
+  factory ChatMessage.fromGameChatResponse(Map<String, dynamic> data) {
+    return ChatMessage(
+      text: data['message'] ?? data['content'] ?? '', // 새로운 형식: message, 기존 형식: content
+      isMe: false, // 서버에서 받은 메시지는 일단 false로 설정
+      playerNumber: data['senderNumber'],
+      isSystem: false,
+      isServerMessage: data['massageReference'] == 'SERVER',
+      roomId: data['roomId'],
+      sendTime: data['sendTime'],
+      messageReference: data['massageReference'],
+    );
+  }
 }
