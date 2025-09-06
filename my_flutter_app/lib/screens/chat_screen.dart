@@ -6,10 +6,12 @@ import 'lose_screen.dart';
 
 class ChatScreen extends StatefulWidget {
   final MatchSuccessResponse matchData;
+  final String accessToken;
 
   const ChatScreen({
     super.key,
     required this.matchData,
+    required this.accessToken,
   });
 
   @override
@@ -24,8 +26,9 @@ class _ChatScreenState extends State<ChatScreen> {
   final ScrollController _scrollController = ScrollController();
   Timer? _timer;
   Timer? _countdownTimer;
+  Timer? _connectionCheckTimer;
   int _remainingSeconds = 180;
-  int _countdownSeconds = 20;
+  int _countdownSeconds = 3;
   bool _isReady = false;
   int? _selectedPlayer;
   // TODO: 실제 게임 인원수에 맞게 동적으로 생성해야 함
@@ -37,17 +40,29 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void initState() {
     super.initState();
-    // 화면이 그려진 후 게임 시작 다이얼로그 표시
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _showGameIntroDialog();
-      _addWelcomeMessage();
-    });
-
-    // ✅ [추가] GameService를 통해 이 방의 공용 채널을 구독 시작
+    
+    // ✅ [추가] GameService를 통해 이 방의 공용 채널을 구독 시작 (먼저 실행)
     _gameService.subscribeToGameChannel(
       roomId: widget.matchData.roomId,
       onEvent: _handleGameEvent, // 메시지가 올 때마다 _handleGameEvent 함수 실행
     );
+    
+    // ✅ [추가] 연결 상태 체크
+    _gameService.checkConnectionStatus();
+    
+    // ✅ [추가] 연결 상태 주기적 체크 (10초마다)
+    _connectionCheckTimer = Timer.periodic(const Duration(seconds: 10), (timer) {
+      _gameService.checkConnectionStatus();
+    });
+
+    // 화면이 그려진 후 게임 시작 다이얼로그 표시 및 환영 메시지 추가
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _showGameIntroDialog();
+      // 환영 메시지는 다이얼로그 표시 후 약간의 지연을 두고 추가
+      Future.delayed(const Duration(milliseconds: 100), () {
+        _addWelcomeMessage();
+      });
+    });
 
     // ✅ [제거] 자동 Ready API 호출 제거 - 준비 버튼 클릭 시에만 호출
   }
@@ -87,6 +102,23 @@ class _ChatScreenState extends State<ChatScreen> {
       );
       
       _addMessage(newMessage);
+    } else if (event is VoteResultEvent) {
+      // 투표 결과 메시지 처리
+      print('🗳️ 투표 결과: ${event.result}');
+      print('📝 내용: ${event.content}');
+      
+      final newMessage = ChatMessage(
+        text: event.content,
+        isMe: false,
+        isSystem: true,
+        isServerMessage: true,
+        messageReference: 'VOTE_RESULT',
+      );
+      
+      _addMessage(newMessage);
+      
+      // 투표 결과를 받으면 게임 완전 종료
+      _completeGame();
     } else {
       print('❓ 알 수 없는 이벤트 타입: ${event.runtimeType}');
     }
@@ -109,43 +141,36 @@ class _ChatScreenState extends State<ChatScreen> {
   void _addWelcomeMessage() {
     if (!mounted) return;
     
-    setState(() {
-      _messages.add(ChatMessage(
-        text: "게임에 참여하신 것을 환영합니다! 🎮",
-        isMe: false,
-        isSystem: true,
-        isServerMessage: false,
-      ));
-    });
-    
-    print('👋 환영 메시지 추가 완료');
+    try {
+      setState(() {
+        _messages.add(ChatMessage(
+          text: "게임에 참여하신 것을 환영합니다! 🎮",
+          isMe: false,
+          isSystem: true,
+          isServerMessage: false,
+        ));
+      });
+      
+      print('👋 환영 메시지 추가 완료');
+    } catch (e) {
+      print('❌ 환영 메시지 추가 중 오류: $e');
+    }
   }
 
   // Ready API 호출
   void _sendReadyRequest() async {
     print('🎮 Ready API 호출 시작');
     print('🏠 방 ID: ${widget.matchData.roomId}');
+    print('🔑 토큰: ${widget.accessToken.substring(0, 20)}...');
     
-    // TODO: 실제 accessToken을 가져와야 함
-    // 현재는 임시로 빈 문자열 사용
-    final accessToken = ''; // 실제 토큰으로 교체 필요
-    
-    if (accessToken.isNotEmpty) {
-      final success = await ApiService.postReady(accessToken, widget.matchData.roomId);
-      if (success) {
-        print('✅ Ready API 호출 성공');
-        setState(() {
-          _isReady = true;
-        });
-      } else {
-        print('❌ Ready API 호출 실패');
-      }
-    } else {
-      print('⚠️ 토큰이 없어 Ready API를 호출할 수 없습니다');
-      // 테스트용으로 준비 상태만 업데이트
+    final success = await ApiService.postReady(widget.accessToken, widget.matchData.roomId);
+    if (success) {
+      print('✅ Ready API 호출 성공');
       setState(() {
         _isReady = true;
       });
+    } else {
+      print('❌ Ready API 호출 실패');
     }
   }
 
@@ -201,6 +226,9 @@ class _ChatScreenState extends State<ChatScreen> {
       print('🏠 방 ID: ${widget.matchData.roomId}');
       print('👤 발신자 번호: ${widget.matchData.userRoomNumber}');
       
+      // 연결 상태 체크
+      _gameService.checkConnectionStatus();
+      
       // GameService를 통해 서버로 메시지 전송 (STOMP)
       _gameService.sendChatMessage(
         roomId: widget.matchData.roomId,
@@ -241,6 +269,12 @@ class _ChatScreenState extends State<ChatScreen> {
     _timer?.cancel();
     _countdownTimer?.cancel();
     _countdownTimer = null;
+    _connectionCheckTimer?.cancel();
+    _connectionCheckTimer = null;
+    
+    // ✅ STOMP 클라이언트는 게임이 완전히 끝날 때만 비활성화
+    // 일반적인 화면 전환 시에는 연결을 유지
+    _gameService.safeDeactivate(force: false); // 연결 유지
     super.dispose();
   }
 
@@ -737,7 +771,14 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _endGame() {
+    print("🎮 게임 종료 - 투표 다이얼로그 표시");
     _showVoteDialog();
+  }
+
+  // 게임 완전 종료 시 STOMP 클라이언트 비활성화
+  void _completeGame() {
+    print("🏁 게임 완전 종료 - STOMP 클라이언트 비활성화");
+    _gameService.safeDeactivate(force: true); // 강제 비활성화
   }
 
   void _showVoteDialog() {
@@ -969,16 +1010,11 @@ class _ChatScreenState extends State<ChatScreen> {
       print('👤 투표 대상: $_selectedPlayer');
       print('🏠 방 ID: ${widget.matchData.roomId}');
       
-      // TODO: 실제 accessToken을 가져와야 함
-      // 현재는 임시로 빈 문자열 사용
-      final accessToken = ''; // 실제 토큰으로 교체 필요
-      
-      if (accessToken.isNotEmpty) {
-        final success = await ApiService.postVote(
-          accessToken,
-          widget.matchData.roomId,
-          _selectedPlayer!,
-        );
+      final success = await ApiService.postVote(
+        widget.accessToken,
+        widget.matchData.roomId,
+        _selectedPlayer!,
+      );
         
         if (success) {
           print('✅ 투표 제출 성공');
@@ -999,8 +1035,6 @@ class _ChatScreenState extends State<ChatScreen> {
         );
       }
     }
-  }
-
 
   String _formatTime(int seconds) {
     int minutes = seconds ~/ 60;
@@ -1033,14 +1067,14 @@ class ChatMessage {
   // GameChatMessageResponse에서 생성
   factory ChatMessage.fromGameChatResponse(Map<String, dynamic> data) {
     return ChatMessage(
-      text: data['message'] ?? data['content'] ?? '', // 새로운 형식: message, 기존 형식: content
+      text: data['content'] ?? data['message'] ?? '', // 새로운 형식: content 우선
       isMe: false, // 서버에서 받은 메시지는 일단 false로 설정
       playerNumber: data['senderNumber'],
       isSystem: false,
-      isServerMessage: data['massageReference'] == 'SERVER',
+      isServerMessage: data['messageReference'] == 'SERVER', // ✅ 오타 수정
       roomId: data['roomId'],
       sendTime: data['sendTime'],
-      messageReference: data['massageReference'],
+      messageReference: data['messageReference'], // ✅ 오타 수정
     );
   }
 }

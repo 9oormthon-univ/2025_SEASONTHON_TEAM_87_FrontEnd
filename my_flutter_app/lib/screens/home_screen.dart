@@ -35,7 +35,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
-    _gameService.deactivate();
+    // ✅ STOMP 클라이언트를 안전하게 관리 - ChatScreen에서 계속 사용해야 함
+    _gameService.safeDeactivate(force: false); // 연결 유지
     super.dispose();
   }
 
@@ -93,7 +94,10 @@ class _HomeScreenState extends State<HomeScreen> {
           Navigator.pushReplacement(
             context,
             MaterialPageRoute(
-              builder: (context) => ChatScreen(matchData: response),
+              builder: (context) => ChatScreen(
+                matchData: response,
+                accessToken: widget.accessToken,
+              ),
             ),
           );
         }
